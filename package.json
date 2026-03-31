@@ -1,0 +1,15 @@
+{
+  "name": "trackos-device-tracker",
+  "version": "1.0.0",
+  "description": "Real-Time Device Tracker - Full Stack Project",
+  "private": true,
+  "scripts": {
+    "start": "cd backend && node server.js",
+    "dev": "cd backend && npm run dev",
+    "install-deps": "cd backend && npm install",
+    "setup": "cd backend && cp .env.example .env && npm install && echo '\n✅ Setup complete! Edit backend/.env with your MongoDB URI and JWT secret, then run: npm run dev'"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

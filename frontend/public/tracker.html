@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>TrackOS — Device Tracker Client</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    :root {
+      --bg: #080c10; --surface: #0d1117; --surface-2: #161b22;
+      --border: #21262d; --accent: #39d353; --accent-red: #f85149;
+      --accent-yellow: #e3b341; --accent-blue: #58a6ff;
+      --text: #e6edf3; --text-muted: #7d8590;
+      --font-mono: 'Space Mono', monospace;
+      --font-sans: 'DM Sans', sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: var(--font-sans);
+      min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 1rem;
+    }
+
+    .container {
+      width: 100%; max-width: 420px;
+      display: flex; flex-direction: column; gap: 1rem;
+    }
+
+    .brand {
+      text-align: center; font-family: var(--font-mono);
+      font-size: 1.3rem; font-weight: 700; color: var(--text);
+    }
+    .brand .accent { color: var(--accent); }
+
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 1.25rem;
+    }
+
+    .card-title {
+      font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted);
+      text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.75rem;
+    }
+
+    /* Status indicator */
+    .status-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.85rem 1.25rem;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+
+    .status-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      transition: background 0.3s;
+    }
+    .status-dot.idle { background: var(--text-muted); }
+    .status-dot.connecting { background: var(--accent-yellow); animation: blink 1s infinite; }
+    .status-dot.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse-glow 2s infinite; }
+    .status-dot.error { background: var(--accent-red); }
+
+    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+    @keyframes pulse-glow { 0%,100% { box-shadow: 0 0 4px var(--accent); } 50% { box-shadow: 0 0 12px var(--accent); } }
+
+    .status-label {
+      font-family: var(--font-mono); font-size: 0.8rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+
+    .ping-count {
+      font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted);
+    }
+
+    /* Form */
+    .form-group { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.85rem; }
+    .form-group label { font-size: 0.68rem; font-family: var(--font-mono); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+    .form-group input {
+      padding: 0.65rem 0.85rem; background: var(--bg);
+      border: 1px solid var(--border); border-radius: 8px;
+      color: var(--text); font-family: var(--font-sans); font-size: 0.9rem;
+      outline: none; transition: border-color 0.2s;
+    }
+    .form-group input:focus { border-color: var(--accent); }
+
+    /* Buttons */
+    .btn-start {
+      width: 100%; padding: 0.9rem; background: var(--accent); border: none;
+      border-radius: 8px; color: #000; font-family: var(--font-mono);
+      font-size: 0.85rem; font-weight: 700; cursor: pointer;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      transition: all 0.2s;
+    }
+    .btn-start:hover { background: #48e564; box-shadow: 0 4px 20px rgba(57,211,83,0.3); }
+    .btn-start:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-stop {
+      width: 100%; padding: 0.9rem; background: rgba(248,81,73,0.1);
+      border: 1px solid rgba(248,81,73,0.4); border-radius: 8px;
+      color: var(--accent-red); font-family: var(--font-mono);
+      font-size: 0.85rem; font-weight: 700; cursor: pointer;
+      text-transform: uppercase; display: none; transition: all 0.2s;
+    }
+    .btn-stop:hover { background: rgba(248,81,73,0.2); }
+
+    /* Location display */
+    .coords-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+    .coord-box {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.65rem; text-align: center;
+    }
+    .coord-label { font-size: 0.6rem; font-family: var(--font-mono); color: var(--text-muted); text-transform: uppercase; }
+    .coord-value { font-family: var(--font-mono); font-size: 0.85rem; font-weight: 700; color: var(--accent); margin-top: 2px; }
+
+    /* Battery */
+    .battery-bar-wrap {
+      height: 8px; background: var(--bg); border-radius: 99px; overflow: hidden;
+      border: 1px solid var(--border); margin-top: 0.5rem;
+    }
+    .battery-bar {
+      height: 100%; border-radius: 99px; transition: width 0.5s, background 0.3s;
+    }
+
+    /* Log */
+    .log-area {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      padding: 0.75rem; font-family: var(--font-mono); font-size: 0.68rem;
+      color: var(--text-muted); height: 120px; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+
+    .log-entry { line-height: 1.4; }
+    .log-entry.ok { color: var(--accent); }
+    .log-entry.err { color: var(--accent-red); }
+    .log-entry.warn { color: var(--accent-yellow); }
+
+    .interval-row {
+      display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.85rem;
+    }
+    .interval-row label { font-size: 0.72rem; font-family: var(--font-mono); color: var(--text-muted); white-space: nowrap; }
+    .interval-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+    .interval-row span { font-family: var(--font-mono); font-size: 0.75rem; min-width: 45px; color: var(--text); }
+  </style>
+</head>
+<body>
+
+<div class="container">
+
+  <div class="brand">Track<span class="accent">OS</span> <span style="opacity:.4">Client</span></div>
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <span class="status-dot idle" id="status-dot"></span>
+    <span class="status-label" id="status-label">Idle</span>
+    <span class="ping-count" id="ping-count">0 pings</span>
+  </div>
+
+  <!-- Setup card -->
+  <div class="card" id="setup-card">
+    <div class="card-title">Device Setup</div>
+
+    <div class="form-group">
+      <label>JWT Token (from Dashboard login)</label>
+      <input type="text" id="input-token" placeholder="Paste your auth token..." />
+    </div>
+
+    <div class="form-group">
+      <label>Device ID (from Dashboard → Devices → Copy ID)</label>
+      <input type="text" id="input-device-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+    </div>
+
+    <div class="interval-row">
+      <label>Update interval:</label>
+      <input type="range" id="input-interval" min="3" max="60" value="10"
+        oninput="document.getElementById('interval-val').textContent = this.value + 's'" />
+      <span id="interval-val">10s</span>
+    </div>
+
+    <button class="btn-start" id="btn-start" onclick="startTracking()">▶ Start Tracking</button>
+    <button class="btn-stop" id="btn-stop" onclick="stopTracking()">⏹ Stop Tracking</button>
+  </div>
+
+  <!-- Live data -->
+  <div class="card" id="live-card" style="display:none">
+    <div class="card-title">Live Location</div>
+    <div class="coords-grid">
+      <div class="coord-box"><div class="coord-label">Latitude</div><div class="coord-value" id="disp-lat">—</div></div>
+      <div class="coord-box"><div class="coord-label">Longitude</div><div class="coord-value" id="disp-lng">—</div></div>
+      <div class="coord-box"><div class="coord-label">Accuracy</div><div class="coord-value" id="disp-acc">—</div></div>
+      <div class="coord-box"><div class="coord-label">Speed</div><div class="coord-value" id="disp-spd">—</div></div>
+    </div>
+
+    <!-- Battery -->
+    <div style="margin-top:1rem">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:0.72rem;font-family:var(--font-mono);color:var(--text-muted);text-transform:uppercase">Battery</span>
+        <span id="disp-bat" style="font-family:var(--font-mono);font-size:0.8rem">—</span>
+      </div>
+      <div class="battery-bar-wrap">
+        <div class="battery-bar" id="bat-bar" style="width:0%;background:var(--accent)"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Log -->
+  <div class="card">
+    <div class="card-title">Activity Log</div>
+    <div class="log-area" id="log-area">
+      <div class="log-entry">Ready. Enter credentials and tap Start Tracking.</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  let socket = null;
+  let watchId = null;
+  let intervalId = null;
+  let pingCount = 0;
+  let lastPosition = null;
+
+  function log(msg, type = '') {
+    const area = document.getElementById('log-area');
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${type}`;
+    entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    area.appendChild(entry);
+    area.scrollTop = area.scrollHeight;
+    // Keep only last 50 entries
+    while (area.children.length > 50) area.removeChild(area.firstChild);
+  }
+
+  function setStatus(state, label) {
+    const dot = document.getElementById('status-dot');
+    dot.className = `status-dot ${state}`;
+    document.getElementById('status-label').textContent = label;
+  }
+
+  function updatePingCount() {
+    document.getElementById('ping-count').textContent = `${pingCount} ping${pingCount !== 1 ? 's' : ''}`;
+  }
+
+  async function getBatteryInfo() {
+    if (!navigator.getBattery) return null;
+    try {
+      const bat = await navigator.getBattery();
+      return { level: Math.round(bat.level * 100), charging: bat.charging };
+    } catch { return null; }
+  }
+
+  function startTracking() {
+    const token = document.getElementById('input-token').value.trim();
+    const deviceId = document.getElementById('input-device-id').value.trim();
+    const interval = parseInt(document.getElementById('input-interval').value) * 1000;
+
+    if (!token || !deviceId) {
+      log('⚠ Token and Device ID are required.', 'warn');
+      return;
+    }
+
+    if (!navigator.geolocation) {
+      log('❌ Geolocation not supported by this browser.', 'err');
+      return;
+    }
+
+    log('Connecting to server...', '');
+    setStatus('connecting', 'Connecting');
+
+    // Connect socket
+    socket = io({ auth: { token } });
+
+    socket.on('connect', () => {
+      log('✅ Socket connected', 'ok');
+      // Register device
+      socket.emit('register_device', { deviceId });
+    });
+
+    socket.on('registered', (data) => {
+      log(`✅ Device registered: ${data.name}`, 'ok');
+      setStatus('active', 'Tracking');
+      document.getElementById('setup-card').style.display = 'none'; // keep visible but hide start
+      document.getElementById('btn-start').style.display = 'none';
+      document.getElementById('btn-stop').style.display = 'block';
+      document.getElementById('live-card').style.display = 'block';
+      startSendingLocation(data.deviceId, interval);
+    });
+
+    socket.on('error', (err) => {
+      log(`❌ ${err.message}`, 'err');
+      setStatus('error', 'Error');
+    });
+
+    socket.on('connect_error', (err) => {
+      log(`❌ Connection failed: ${err.message}`, 'err');
+      setStatus('error', 'Error');
+    });
+
+    socket.on('disconnect', () => {
+      log('⚠ Socket disconnected', 'warn');
+      setStatus('error', 'Disconnected');
+    });
+  }
+
+  function startSendingLocation(mongoDeviceId, interval) {
+    sendLocation(mongoDeviceId);
+    intervalId = setInterval(() => sendLocation(mongoDeviceId), interval);
+  }
+
+  async function sendLocation(mongoDeviceId) {
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        lastPosition = pos;
+        const { latitude, longitude, accuracy, altitude, speed, heading } = pos.coords;
+        const battery = await getBatteryInfo();
+
+        // Update display
+        document.getElementById('disp-lat').textContent = latitude.toFixed(6);
+        document.getElementById('disp-lng').textContent = longitude.toFixed(6);
+        document.getElementById('disp-acc').textContent = accuracy ? `${Math.round(accuracy)}m` : '—';
+        document.getElementById('disp-spd').textContent = speed != null ? `${(speed * 3.6).toFixed(1)} km/h` : '—';
+
+        if (battery) {
+          const batColor = battery.level < 15 ? '#f85149' : battery.level < 40 ? '#e3b341' : '#39d353';
+          document.getElementById('disp-bat').textContent = `${battery.level}%${battery.charging ? ' ⚡' : ''}`;
+          document.getElementById('bat-bar').style.width = `${battery.level}%`;
+          document.getElementById('bat-bar').style.background = batColor;
+        }
+
+        // Emit to server
+        socket.emit('location_update', {
+          deviceId: mongoDeviceId,
+          lat: latitude, lng: longitude,
+          accuracy, altitude, speed, heading,
+          battery,
+          timestamp: new Date().toISOString()
+        });
+
+        pingCount++;
+        updatePingCount();
+        log(`📍 ${latitude.toFixed(5)}, ${longitude.toFixed(5)} (±${Math.round(accuracy)}m)`, 'ok');
+      },
+      (err) => {
+        log(`❌ GPS error: ${err.message}`, 'err');
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  }
+
+  function stopTracking() {
+    if (intervalId) clearInterval(intervalId);
+    if (watchId) navigator.geolocation.clearWatch(watchId);
+    if (socket) socket.disconnect();
+
+    pingCount = 0;
+    updatePingCount();
+    setStatus('idle', 'Idle');
+    log('⏹ Tracking stopped', 'warn');
+
+    document.getElementById('btn-start').style.display = 'block';
+    document.getElementById('btn-stop').style.display = 'none';
+    document.getElementById('live-card').style.display = 'none';
+  }
+
+  // Auto-fill from URL params (useful for deep-linking)
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('token')) document.getElementById('input-token').value = params.get('token');
+  if (params.get('deviceId')) document.getElementById('input-device-id').value = params.get('deviceId');
+</script>
+</body>
+</html>

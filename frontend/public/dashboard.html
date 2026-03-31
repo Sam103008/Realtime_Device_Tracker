@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Track map— Dashboard</title>
+  <link rel="stylesheet" href="/css/dashboard.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <!-- Leaflet.js (OpenStreetMap - free, no API key needed) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Socket.IO client -->
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="20" cy="20" r="18" stroke="currentColor" stroke-width="2"/>
+            <circle cx="20" cy="20" r="6" fill="currentColor"/>
+            <line x1="20" y1="2" x2="20" y2="10" stroke="currentColor" stroke-width="2"/>
+            <line x1="20" y1="30" x2="20" y2="38" stroke="currentColor" stroke-width="2"/>
+            <line x1="2" y1="20" x2="10" y2="20" stroke="currentColor" stroke-width="2"/>
+            <line x1="30" y1="20" x2="38" y2="20" stroke="currentColor" stroke-width="2"/>
+          </svg>
+        </div>
+        <span class="brand-name">Track<span class="accent">map</span></span>
+      </div>
+      <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
+    </div>
+
+    <!-- Nav -->
+    <nav class="sidebar-nav">
+      <a href="#" class="nav-item active" data-view="map" onclick="switchView('map', this)">
+        <span class="nav-icon">🗺️</span><span class="nav-label">Live Map</span>
+      </a>
+      <a href="#" class="nav-item" data-view="devices" onclick="switchView('devices', this)">
+        <span class="nav-icon">📱</span><span class="nav-label">Devices</span>
+        <span class="nav-badge" id="device-count-badge">0</span>
+      </a>
+      <a href="#" class="nav-item" data-view="history" onclick="switchView('history', this)">
+        <span class="nav-icon">📍</span><span class="nav-label">Location History</span>
+      </a>
+      <a href="#" class="nav-item" data-view="geofences" onclick="switchView('geofences', this)">
+        <span class="nav-icon">🔵</span><span class="nav-label">Geofences</span>
+      </a>
+      <a href="#" class="nav-item" data-view="alerts" onclick="switchView('alerts', this)">
+        <span class="nav-icon">🔔</span><span class="nav-label">Alerts</span>
+        <span class="nav-badge alert-badge hidden" id="alert-badge">0</span>
+      </a>
+      <a href="#" class="nav-item" data-view="admin" onclick="switchView('admin', this)" id="admin-nav" style="display:none">
+        <span class="nav-icon">⚙️</span><span class="nav-label">Admin Panel</span>
+      </a>
+    </nav>
+
+    <!-- User card -->
+    <div class="user-card">
+      <div class="user-avatar" id="user-avatar">?</div>
+      <div class="user-info">
+        <div class="user-name" id="user-name">Loading...</div>
+        <div class="user-role" id="user-role">user</div>
+      </div>
+      <button class="logout-btn" onclick="logout()" title="Logout">⏻</button>
+    </div>
+  </aside>
+
+  <!-- ── Mobile top bar ── -->
+  <header class="topbar">
+    <button class="menu-btn" onclick="toggleSidebar()">☰</button>
+    <span class="topbar-title">TrackOS</span>
+    <div class="topbar-actions">
+      <span class="connection-dot" id="conn-dot" title="Disconnected"></span>
+    </div>
+  </header>
+
+  <!-- ── Main content ── -->
+  <main class="main-content">
+
+    <!-- ── VIEW: Live Map ── -->
+    <section class="view active" id="view-map">
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">Live Map</h1>
+          <p class="view-subtitle">Real-time device locations</p>
+        </div>
+        <div class="header-actions">
+          <select class="select-device" id="map-device-filter" onchange="filterMapDevice(this.value)">
+            <option value="all">All Devices</option>
+          </select>
+          <button class="btn-sm btn-outline" onclick="fitMapBounds()">⊞ Fit All</button>
+        </div>
+      </div>
+
+      <!-- Stats row -->
+      <div class="stats-row" id="stats-row">
+        <div class="stat-card">
+          <div class="stat-value" id="stat-total">0</div>
+          <div class="stat-label">Total Devices</div>
+        </div>
+        <div class="stat-card online">
+          <div class="stat-value" id="stat-online">0</div>
+          <div class="stat-label">Online</div>
+        </div>
+        <div class="stat-card offline">
+          <div class="stat-value" id="stat-offline">0</div>
+          <div class="stat-label">Offline</div>
+        </div>
+        <div class="stat-card alerts">
+          <div class="stat-value" id="stat-alerts">0</div>
+          <div class="stat-label">Alerts Today</div>
+        </div>
+      </div>
+
+      <!-- Map -->
+      <div class="map-wrapper">
+        <div id="map"></div>
+        <!-- Path toggle -->
+        <div class="map-controls">
+          <button class="map-ctrl-btn active" id="btn-show-path" onclick="togglePath()" title="Toggle movement path">🛤 Path</button>
+          <button class="map-ctrl-btn" id="btn-show-fences" onclick="toggleFences()" title="Toggle geofences">🔵 Fences</button>
+          <button class="map-ctrl-btn" onclick="refreshMap()" title="Refresh">↻</button>
+        </div>
+      </div>
+
+      <!-- Device quick list -->
+      <div class="device-quick-list" id="device-quick-list">
+        <!-- Populated by JS -->
+      </div>
+    </section>
+
+    <!-- ── VIEW: Devices ── -->
+    <section class="view" id="view-devices">
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">Devices</h1>
+          <p class="view-subtitle">Manage your tracked devices</p>
+        </div>
+        <button class="btn-primary" onclick="openAddDeviceModal()">+ Add Device</button>
+      </div>
+
+      <div class="device-grid" id="device-grid">
+        <div class="loading-state">Loading devices...</div>
+      </div>
+    </section>
+
+    <!-- ── VIEW: Location History ── -->
+    <section class="view" id="view-history">
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">Location History</h1>
+          <p class="view-subtitle">Recorded GPS pings</p>
+        </div>
+      </div>
+
+      <div class="history-controls">
+        <select class="select-device" id="history-device-select" onchange="loadHistory()">
+          <option value="">Select a device...</option>
+        </select>
+        <select class="select-device" id="history-hours" onchange="loadHistory()">
+          <option value="6">Last 6 hours</option>
+          <option value="24" selected>Last 24 hours</option>
+          <option value="72">Last 3 days</option>
+          <option value="168">Last 7 days</option>
+        </select>
+        <button class="btn-sm btn-danger" onclick="clearHistory()">🗑 Clear History</button>
+      </div>
+
+      <!-- Mini path map -->
+      <div class="mini-map-wrapper" id="history-map-wrapper" style="display:none">
+        <div id="history-map"></div>
+      </div>
+
+      <div class="history-table-wrapper">
+        <table class="data-table" id="history-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Latitude</th>
+              <th>Longitude</th>
+              <th>Accuracy</th>
+              <th>Speed</th>
+              <th>Battery</th>
+              <th>Time</th>
+            </tr>
+          </thead>
+          <tbody id="history-tbody">
+            <tr><td colspan="7" class="empty-state">Select a device to view history</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ── VIEW: Geofences ── -->
+    <section class="view" id="view-geofences">
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">Geofences</h1>
+          <p class="view-subtitle">Set geographic alert zones</p>
+        </div>
+        <button class="btn-primary" onclick="openGeofenceModal()">+ Add Geofence</button>
+      </div>
+
+      <div class="geofence-layout">
+        <!-- Geofence list -->
+        <div class="geofence-list" id="geofence-list">
+          <div class="loading-state">Loading...</div>
+        </div>
+        <!-- Geofence map preview -->
+        <div class="geofence-map-wrapper">
+          <div id="geofence-map"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── VIEW: Alerts ── -->
+    <section class="view" id="view-alerts">
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">Alerts</h1>
+          <p class="view-subtitle">Geofence and system notifications</p>
+        </div>
+        <button class="btn-sm btn-outline" onclick="clearAlerts()">Clear All</button>
+      </div>
+
+      <div class="alert-list" id="alert-list">
+        <div class="empty-state">No alerts yet. Alerts appear here when devices cross geofence boundaries.</div>
+      </div>
+    </section>
+
+    <!-- ── VIEW: Admin ── -->
+    <section class="view" id="view-admin">
+      <div class="view-header">
+        <div>
+          <h1 class="view-title">Admin Panel</h1>
+          <p class="view-subtitle">User and system management</p>
+        </div>
+      </div>
+
+      <div class="admin-stats" id="admin-stats"><!-- loaded by JS --></div>
+
+      <h2 class="section-title">All Users</h2>
+      <div class="table-wrapper">
+        <table class="data-table" id="admin-users-table">
+          <thead>
+            <tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Joined</th><th>Actions</th></tr>
+          </thead>
+          <tbody id="admin-users-tbody">
+            <tr><td colspan="6" class="empty-state">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ── MODALS ── -->
+
+  <!-- Add Device Modal -->
+  <div class="modal-overlay hidden" id="modal-add-device" onclick="closeModal('modal-add-device')">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h2>Register New Device</h2>
+        <button onclick="closeModal('modal-add-device')">✕</button>
+      </div>
+      <form onsubmit="submitAddDevice(event)">
+        <div class="form-group">
+          <label>Device Name *</label>
+          <input type="text" id="dev-name" placeholder="My iPhone" required />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Type</label>
+            <select id="dev-type">
+              <option value="mobile">📱 Mobile</option>
+              <option value="laptop">💻 Laptop</option>
+              <option value="tablet">📟 Tablet</option>
+              <option value="vehicle">🚗 Vehicle</option>
+              <option value="other">📦 Other</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Marker Color</label>
+            <input type="color" id="dev-color" value="#6366f1" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Notes</label>
+          <input type="text" id="dev-notes" placeholder="Optional description..." />
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn-outline" onclick="closeModal('modal-add-device')">Cancel</button>
+          <button type="submit" class="btn-primary">Register Device</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Device Detail Modal -->
+  <div class="modal-overlay hidden" id="modal-device-detail" onclick="closeModal('modal-device-detail')">
+    <div class="modal modal-wide" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h2 id="detail-title">Device Details</h2>
+        <button onclick="closeModal('modal-device-detail')">✕</button>
+      </div>
+      <div id="device-detail-content"><!-- populated by JS --></div>
+    </div>
+  </div>
+
+  <!-- Add Geofence Modal -->
+  <div class="modal-overlay hidden" id="modal-geofence" onclick="closeModal('modal-geofence')">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h2>Create Geofence</h2>
+        <button onclick="closeModal('modal-geofence')">✕</button>
+      </div>
+      <form onsubmit="submitGeofence(event)">
+        <div class="form-group">
+          <label>Fence Name *</label>
+          <input type="text" id="fence-name" placeholder="Home Zone" required />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Center Latitude *</label>
+            <input type="number" step="any" id="fence-lat" placeholder="28.6139" required />
+          </div>
+          <div class="form-group">
+            <label>Center Longitude *</label>
+            <input type="number" step="any" id="fence-lng" placeholder="77.2090" required />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Radius (meters) *</label>
+          <input type="number" id="fence-radius" min="50" max="50000" value="500" required />
+        </div>
+        <div class="form-group">
+          <label>Link to Device (optional)</label>
+          <select id="fence-device">
+            <option value="">All Devices</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label class="checkbox-label">
+            <input type="checkbox" id="fence-alert-exit" checked /> Alert on Exit
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="fence-alert-enter" /> Alert on Enter
+          </label>
+        </div>
+        <p class="hint">💡 Tip: Click on the map to pick center coordinates</p>
+        <div class="modal-footer">
+          <button type="button" class="btn-outline" onclick="closeModal('modal-geofence')">Cancel</button>
+          <button type="submit" class="btn-primary">Create Geofence</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Alert Toast -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Scripts -->
+  <script src="/js/app.js"></script>
+</body>
+</html>
